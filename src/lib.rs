@@ -48,10 +48,10 @@ use digest::Digest;
 
 /// A hasher that will be a wrapper over any Write / AsyncWrite object and transparently calculate
 /// hash for any data written to it
-#[pin_project::pin_project]
+#[cfg_attr(any(feature = "futures", feature = "tokio"), pin_project::pin_project)]
 pub struct WriteHasher<D, T> {
     hasher: D,
-    #[pin]
+    #[cfg_attr(any(feature = "futures", feature = "tokio"), pin)]
     inner: T,
 }
 
