@@ -24,10 +24,7 @@
     )
 ))]
 compile_error!("Please either use digest feature (for generic impls) or concrete_impls (sha1, sha2, md2, md4, md5, blake2, crc32fast) features (for concrete impls), but not both");
-
-// use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
-
 #[cfg(feature = "digest")]
 use digest::Digest;
 
@@ -40,18 +37,6 @@ pub struct WriteHasher<D, T> {
     inner: T,
 }
 
-// impl<D, T> Deref for WriteHasher<D, T> {
-//     type Target = T;
-//     fn deref(&self) -> &Self::Target {
-//         &self.inner
-//     }
-// }
-
-// impl<D, T> DerefMut for WriteHasher<D, T> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.inner
-//     }
-// }
 
 impl<D: Default, T> WriteHasher<D, T> {
     pub fn new_with_hasher(inner: T, hasher: D) -> Self {
