@@ -1,3 +1,15 @@
+//! A hasher that will be a wrapper over any  
+//! [`std::io::Write`][std::io::Write] /  
+//! [`futures::io::AsyncWrite`][futures::io::AsyncWrite] /  
+//! [`tokio::io::AsyncWrite`][tokio::io::AsyncWrite] object  
+//!
+//!  You can wrap any of the previous trait object inside and that will transparently hash the data that is being
+//!  written to it.  
+//!
+//!
+//! The object should implement AsyncRead so that it can wrap some data and then read from that
+//! transparently while offloading the hashing to another thread.
+
 #[cfg(all(
     feature = "digest",
     any(
@@ -13,16 +25,14 @@
 ))]
 compile_error!("Please either use digest feature (for generic impls) or concrete_impls (sha1, sha2, md2, md4, md5, blake2, crc32fast) features (for concrete impls), but not both");
 
-use core::ops::{Deref, DerefMut};
+// use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 
 #[cfg(feature = "digest")]
 use digest::Digest;
 
-/// A hasher that will be a async sink so that we can read and write data to and from it.
-///
-/// The object should implement AsyncRead so that it can wrap some data and then read from that
-/// transparently while offloading the hashing to another thread.
+/// A hasher that will be a wrapper over any Write / AsyncWrite object and transparently calculate
+/// hash for any data written to it
 #[pin_project::pin_project]
 pub struct WriteHasher<D, T> {
     hasher: D,
@@ -30,18 +40,18 @@ pub struct WriteHasher<D, T> {
     inner: T,
 }
 
-impl<D, T> Deref for WriteHasher<D, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
+// impl<D, T> Deref for WriteHasher<D, T> {
+//     type Target = T;
+//     fn deref(&self) -> &Self::Target {
+//         &self.inner
+//     }
+// }
 
-impl<D, T> DerefMut for WriteHasher<D, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
+// impl<D, T> DerefMut for WriteHasher<D, T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self.inner
+//     }
+// }
 
 impl<D: Default, T> WriteHasher<D, T> {
     pub fn new_with_hasher(inner: T, hasher: D) -> Self {
@@ -66,6 +76,8 @@ impl<D: Digest + digest::Reset, T> WriteHasher<D, T> {
     }
 }
 
+/// A minimal version of [`Digest`][digest::digest] trait that is used to implement the WriteHasher
+/// and all implementations of the Digest trait.
 pub trait MinDigest {
     type Output;
     fn update(&mut self, data: impl AsRef<[u8]>);
@@ -222,6 +234,7 @@ mod crc32fast {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 #[cfg(feature = "tokio")]
 impl<D: MinDigest, T: tokio::io::AsyncWrite + std::marker::Unpin> tokio::io::AsyncWrite
     for WriteHasher<D, T>
