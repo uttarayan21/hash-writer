@@ -9,6 +9,20 @@
 //!
 //! The object should implement AsyncRead so that it can wrap some data and then read from that
 //! transparently while offloading the hashing to another thread.
+//! ```rust
+//! extern crate sha2;
+//! use write_hasher::{WriteHasher, MinDigest};
+//! let mut src = std::fs::File::open(".gitignore").unwrap();
+//! let sink = std::io::sink();
+//! let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
+//! std::io::copy(&mut src, &mut hasher).unwrap();
+//! let x = hasher.finalize();
+//! let x = format!("{:x}", x);
+//! assert_eq!(
+//!     "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
+//!     x
+//! );
+//! ```
 
 #[cfg(all(
     feature = "digest",
@@ -23,7 +37,11 @@
         feature = "crc32fast"
     )
 ))]
-compile_error!("Please either use digest feature (for generic impls) or concrete_impls (sha1, sha2, md2, md4, md5, blake2, crc32fast) features (for concrete impls), but not both");
+compile_error!("Please either use digest feature (for generic impls) or
+               concrete_impls (sha1, sha2, md2, md4, md5, blake2, crc32fast) features (for concrete impls),
+               but not both");
+
+#[cfg(any(feature = "futures", feature = "tokio"))]
 use core::pin::Pin;
 #[cfg(feature = "digest")]
 use digest::Digest;
@@ -36,7 +54,6 @@ pub struct WriteHasher<D, T> {
     #[pin]
     inner: T,
 }
-
 
 impl<D: Default, T> WriteHasher<D, T> {
     pub fn new_with_hasher(inner: T, hasher: D) -> Self {
@@ -291,71 +308,76 @@ impl<D: MinDigest, T: std::io::Write> std::io::Write for WriteHasher<D, T> {
     }
 }
 
-#[tokio::test]
-#[cfg(feature = "tokio")]
-#[cfg(any(feature = "sha2", feature = "digest"))]
-async fn test_read() {
-    extern crate sha2;
-    let mut src = tokio::fs::File::open(".gitignore").await.unwrap();
-    let sink = tokio::io::sink();
-    let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
-    tokio::io::copy(&mut src, &mut hasher).await.unwrap();
-    // hasher.write_all(b"hello worlding").await.unwrap();
-    let x = hasher.finalize();
-    let x = format!("{:x}", x);
-    assert_eq!(
-        "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
-        x
-    );
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    #[cfg(feature = "tokio")]
+    #[cfg(any(feature = "sha2", feature = "digest"))]
+    async fn test_read() {
+        extern crate sha2;
+        let mut src = tokio::fs::File::open(".gitignore").await.unwrap();
+        let sink = tokio::io::sink();
+        let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
+        tokio::io::copy(&mut src, &mut hasher).await.unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let x = hasher.finalize();
+        let x = format!("{:x}", x);
+        assert_eq!(
+            "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
+            x
+        );
+    }
 
-#[tokio::test]
-#[cfg(feature = "futures")]
-#[cfg(any(feature = "sha2", feature = "digest"))]
-async fn test_read_futures() {
-    extern crate sha2;
-    let src = std::fs::read(".gitignore").unwrap();
-    let src = futures::io::Cursor::new(src);
-    let sink = futures::io::sink();
-    let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
-    futures::io::copy(src, &mut hasher).await.unwrap();
-    // hasher.write_all(b"hello worlding").await.unwrap();
-    let x = hasher.finalize();
-    let x = format!("{:x}", x);
-    assert_eq!(
-        "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
-        x
-    );
-}
+    #[tokio::test]
+    #[cfg(feature = "futures")]
+    #[cfg(any(feature = "sha2", feature = "digest"))]
+    async fn test_read_futures() {
+        extern crate sha2;
+        let src = std::fs::read(".gitignore").unwrap();
+        let src = futures::io::Cursor::new(src);
+        let sink = futures::io::sink();
+        let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
+        futures::io::copy(src, &mut hasher).await.unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let x = hasher.finalize();
+        let x = format!("{:x}", x);
+        assert_eq!(
+            "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
+            x
+        );
+    }
 
-#[tokio::test]
-#[cfg(feature = "tokio")]
-#[cfg(feature = "crc32fast")]
-async fn test_crc32() {
-    extern crate crc32fast;
-    let mut src = tokio::fs::File::open(".gitignore").await.unwrap();
-    let sink = tokio::io::sink();
-    let mut hasher = WriteHasher::<crc32fast::Hasher, _>::new_with_hasher(sink, Default::default());
-    tokio::io::copy(&mut src, &mut hasher).await.unwrap();
-    // hasher.write_all(b"hello worlding").await.unwrap();
-    let x = hasher.finalize();
-    assert_eq!(x, 0x705ffe14);
-}
+    #[tokio::test]
+    #[cfg(feature = "tokio")]
+    #[cfg(feature = "crc32fast")]
+    async fn test_crc32() {
+        extern crate crc32fast;
+        let mut src = tokio::fs::File::open(".gitignore").await.unwrap();
+        let sink = tokio::io::sink();
+        let mut hasher =
+            WriteHasher::<crc32fast::Hasher, _>::new_with_hasher(sink, Default::default());
+        tokio::io::copy(&mut src, &mut hasher).await.unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let x = hasher.finalize();
+        assert_eq!(x, 0x705ffe14);
+    }
 
-#[test]
-#[cfg(feature = "stdio")]
-#[cfg(any(feature = "sha2", feature = "digest"))]
-fn test_read_stdio() {
-    extern crate sha2;
-    let mut src = std::fs::File::open(".gitignore").unwrap();
-    let sink = std::io::sink();
-    let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
-    std::io::copy(&mut src, &mut hasher).unwrap();
-    // hasher.write_all(b"hello worlding").await.unwrap();
-    let x = hasher.finalize();
-    let x = format!("{:x}", x);
-    assert_eq!(
-        "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
-        x
-    );
+    #[test]
+    #[cfg(feature = "stdio")]
+    #[cfg(any(feature = "sha2", feature = "digest"))]
+    fn test_read_stdio() {
+        extern crate sha2;
+        let mut src = std::fs::File::open(".gitignore").unwrap();
+        let sink = std::io::sink();
+        let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
+        std::io::copy(&mut src, &mut hasher).unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let x = hasher.finalize();
+        let x = format!("{:x}", x);
+        assert_eq!(
+            "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
+            x
+        );
+    }
 }

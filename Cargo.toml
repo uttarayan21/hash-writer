@@ -26,7 +26,7 @@ sha2 = "0.10.6"
 tokio = { version = "1.27.0", features = ["io-util", "test-util", "fs", "macros"] }
 
 [features]
-default = ["tokio", "futures", "stdio"]
+default = ["stdio", "digest"]
 # Which version of AsyncWrite / Write trait to use
 tokio = ["dep:tokio"] 
 futures = ["dep:futures"]
