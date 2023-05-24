@@ -42,8 +42,7 @@ compile_error!("Please either use digest feature (for generic impls) or
                but not both");
 
 #[cfg(any(feature = "futures", feature = "tokio"))]
-use core::pin::Pin;
-use core::task::Poll;
+use core::{pin::Pin, task::Poll};
 #[cfg(feature = "digest")]
 use digest::Digest;
 
