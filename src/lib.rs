@@ -43,33 +43,45 @@ compile_error!("Please either use digest feature (for generic impls) or
 
 #[cfg(any(feature = "futures", feature = "tokio"))]
 use core::pin::Pin;
+use core::task::Poll;
 #[cfg(feature = "digest")]
 use digest::Digest;
 
 /// A hasher that will be a wrapper over any Write / AsyncWrite object and transparently calculate
 /// hash for any data written to it
 #[cfg_attr(any(feature = "futures", feature = "tokio"), pin_project::pin_project)]
+#[derive(Default)]
 pub struct WriteHasher<D, T> {
     hasher: D,
     #[cfg_attr(any(feature = "futures", feature = "tokio"), pin)]
     inner: T,
 }
 
-impl<D: Default, T> WriteHasher<D, T> {
+impl<D, T> WriteHasher<D, T> {
     pub fn new_with_hasher(inner: T, hasher: D) -> Self {
         Self { hasher, inner }
     }
-}
 
-#[cfg(feature = "digest")]
-impl<D: Digest, T> WriteHasher<D, T> {
-    pub fn new(inner: T) -> Self {
+    pub fn new(inner: T) -> Self
+    where
+        D: Default,
+    {
         Self {
-            hasher: D::new(),
+            hasher: Default::default(),
             inner,
         }
     }
 }
+
+// #[cfg(feature = "digest")]
+// impl<D: Digest, T> WriteHasher<D, T> {
+//     pub fn new(inner: T) -> Self {
+//         Self {
+//             hasher: D::new(),
+//             inner,
+//         }
+//     }
+// }
 
 #[cfg(feature = "digest")]
 impl<D: Digest + digest::Reset, T> WriteHasher<D, T> {
@@ -236,6 +248,30 @@ mod crc32fast {
     }
 }
 
+// #[cfg(feature = "crc32c")]
+pub mod crc32c {
+    use super::MinDigest;
+    #[repr(transparent)]
+    #[derive(Debug, Default)]
+    pub struct Crc32c(u32);
+
+    impl Crc32c {
+        pub fn new() -> Self {
+            Default::default()
+        }
+    }
+
+    impl MinDigest for Crc32c {
+        type Output = u32;
+        fn update(&mut self, data: impl AsRef<[u8]>) {
+            self.0 = crc32c::crc32c_append(self.0, data.as_ref())
+        }
+        fn finalize(self) -> Self::Output {
+            self.0
+        }
+    }
+}
+
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 #[cfg(feature = "tokio")]
 impl<D: MinDigest, T: tokio::io::AsyncWrite + std::marker::Unpin> tokio::io::AsyncWrite
@@ -248,7 +284,9 @@ impl<D: MinDigest, T: tokio::io::AsyncWrite + std::marker::Unpin> tokio::io::Asy
     ) -> std::task::Poll<std::io::Result<usize>> {
         let ah = self.project();
         let r = ah.inner.poll_write(cx, buf);
-        ah.hasher.update(buf);
+        if let Poll::Ready(Ok(n)) = r {
+            ah.hasher.update(&buf[..n]);
+        }
         r
     }
     fn poll_flush(
@@ -278,7 +316,9 @@ impl<D: MinDigest, T: futures::io::AsyncWrite + std::marker::Unpin> futures::io:
     ) -> std::task::Poll<futures::io::Result<usize>> {
         let ah = self.project();
         let r = ah.inner.poll_write(cx, buf);
-        ah.hasher.update(buf);
+        if let Poll::Ready(Ok(n)) = r {
+            ah.hasher.update(&buf[..n]);
+        }
         r
     }
     fn poll_flush(
@@ -300,8 +340,11 @@ impl<D: MinDigest, T: futures::io::AsyncWrite + std::marker::Unpin> futures::io:
 #[cfg(feature = "stdio")]
 impl<D: MinDigest, T: std::io::Write> std::io::Write for WriteHasher<D, T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.hasher.update(buf);
-        self.inner.write(buf)
+        let r = std::io::Write::write(&mut self.inner, buf);
+        if let Ok(n) = r {
+            MinDigest::update(&mut self.hasher, &buf[..n]);
+        }
+        r
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
@@ -379,5 +422,28 @@ mod tests {
             "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
             x
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    #[cfg(all(feature = "tokio", feature = "stdio"))]
+    #[cfg(any(feature = "crc32c", feature = "digest"))]
+    async fn test_tokio_bigfile() {
+        let mut src = tokio::fs::File::open("file.zip").await.unwrap();
+        let sink = tokio::io::sink();
+        let mut hasher = WriteHasher::<crc32c::Crc32c, _>::new(sink);
+        tokio::io::copy(&mut src, &mut hasher).await.unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let x = hasher.finalize();
+        assert_eq!(x, 0xbd7a7dfe);
+        let mut src = std::fs::File::open("file.zip").unwrap();
+        let sink = std::io::sink();
+        let mut hasher = WriteHasher::<crc32c::Crc32c, _>::new(sink);
+        std::io::copy(&mut src, &mut hasher).unwrap();
+        // hasher.write_all(b"hello worlding").await.unwrap();
+        let y = hasher.finalize();
+        assert_eq!(x, y);
+        assert_eq!(3178921470, x);
+        assert_eq!(3178921470, y);
     }
 }
