@@ -1,7 +1,8 @@
 //! A hasher that will be a wrapper over any  
-//! [`std::io::Write`][std::io::Write] /  
-//! [`futures::io::AsyncWrite`][futures::io::AsyncWrite] /  
-//! [`tokio::io::AsyncWrite`][tokio::io::AsyncWrite] object  
+//! [std::io::Write] /  
+//! #[cfg(feature = "futures")] [futures::io::AsyncWrite] /
+//! [futures::io::AsyncWrite]
+//! [tokio::io::AsyncWrite] object  
 //!
 //!  You can wrap any of the previous trait object inside and that will transparently hash the data that is being
 //!  written to it.  
@@ -410,7 +411,7 @@ mod tests {
     #[cfg(any(feature = "sha2", feature = "digest"))]
     fn test_read_stdio() {
         extern crate sha2;
-        let mut src = std::fs::File::open(".gitignore").unwrap();
+        let mut src = std::fs::File::open("justfile").unwrap();
         let sink = std::io::sink();
         let mut hasher = WriteHasher::<sha2::Sha256, _>::new(sink);
         std::io::copy(&mut src, &mut hasher).unwrap();
@@ -418,7 +419,7 @@ mod tests {
         let x = hasher.finalize();
         let x = format!("{:x}", x);
         assert_eq!(
-            "c1e953ee360e77de57f7b02f1b7880bd6a3dc22d1a69e953c2ac2c52cc52d247",
+            "11988b1547f85cd1a364ecd4c2cd34ad4d99617bb9af4a02d744cd7223d64f06",
             x
         );
     }
